@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FacePlay - WebAR Mini Games</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- MediaPipe AI Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+  <style>
+    /* ซ่อน Scrollbar ของเมนูเลือกเกม */
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-gray-900 text-white h-screen w-screen overflow-hidden flex justify-center select-none font-sans">
+
+  <!-- โครงสร้างแอป (จำลองขนาดหน้าจอมือถือ) -->
+  <div class="relative w-full h-full max-w-md bg-black shadow-2xl overflow-hidden">
+
+    <!-- 🎥 ส่วนระบบภาพ -->
+    <video id="webcam" class="hidden" autoplay playsinline></video>
+    <canvas id="gameCanvas" class="absolute inset-0 w-full h-full object-cover z-0"></canvas>
+
+    <!-- 📊 Top UI: แถบคะแนน (ซ่อนตอนอยู่หน้าเมนู) -->
+    <div id="gameUI" class="hidden absolute top-6 inset-x-4 flex justify-between items-start z-20 pointer-events-none">
+      <div class="flex flex-col gap-2">
+        <button id="backBtn" onclick="backToMenu()" class="pointer-events-auto bg-gray-800/80 p-2 w-fit rounded-full backdrop-blur-sm border border-gray-600 active:scale-90">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+        </button>
+        <div class="bg-black/70 px-4 py-1.5 rounded-full border border-gray-600 backdrop-blur-sm flex items-center gap-2">
+          <span class="text-xs text-gray-300 font-bold">SCORE:</span>
+          <span id="scoreText" class="font-black text-xl text-green-400">0</span>
+        </div>
+      </div>
+      <div id="livesText" class="text-2xl drop-shadow-md tracking-widest text-right">❤️❤️❤️</div>
+    </div>
+
+    <!-- 🎛️ Bottom UI: แผงเลือกเกม -->
+    <div id="menuPanel" class="absolute inset-0 flex flex-col justify-end z-30 bg-gradient-to-t from-black via-black/95 to-gray-900/80 transition-all duration-500">
+      
+      <div class="p-6 text-center mb-4">
+        <h1 class="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-500 mb-2">FacePlay</h1>
+        <p class="text-gray-400 text-sm">เลือกฟิลเตอร์เกมแล้วลุยเลย!</p>
+      </div>
+
+      <!-- Carousel เลือกเกม -->
+      <div class="flex overflow-x-auto gap-4 px-6 pb-6 snap-x hide-scrollbar">
+        
+        <button onclick="selectGame('sushi', this)" class="game-card snap-center shrink-0 w-36 h-48 bg-gray-800 rounded-3xl border-2 border-gray-600 flex flex-col items-center justify-center gap-3 hover:border-pink-500 focus:border-pink-500 focus:bg-pink-900/40 transition-all">
+          <span class="text-5xl drop-shadow-lg">🍣</span>
+          <div class="text-center">
+            <span class="block text-sm font-bold text-white">กินซูชิ</span>
+            <span class="block text-[10px] text-gray-400 mt-1">อ้าปากงับให้ทัน!</span>
+          </div>
+        </button>
+
+        <button onclick="selectGame('dodge', this)" class="game-card snap-center shrink-0 w-36 h-48 bg-gray-800 rounded-3xl border-2 border-gray-600 flex flex-col items-center justify-center gap-3 hover:border-cyan-500 focus:border-cyan-500 focus:bg-cyan-900/40 transition-all">
+          <span class="text-5xl drop-shadow-lg">📁</span>
+          <div class="text-center">
+            <span class="block text-sm font-bold text-white">หลบงาน</span>
+            <span class="block text-[10px] text-gray-400 mt-1">โยกหัวหลบซ้ายขวา</span>
+          </div>
+        </button>
+
+        <button onclick="selectGame('smile', this)" class="game-card snap-center shrink-0 w-36 h-48 bg-gray-800 rounded-3xl border-2 border-gray-600 flex flex-col items-center justify-center gap-3 hover:border-yellow-500 focus:border-yellow-500 focus:bg-yellow-900/40 transition-all">
+          <span class="text-5xl drop-shadow-lg">💰</span>
+          <div class="text-center">
+            <span class="block text-sm font-bold text-white">ยิ้มรับทรัพย์</span>
+            <span class="block text-[10px] text-gray-400 mt-1">ยิ้มกว้างๆ ชนเหรียญ</span>
+          </div>
+        </button>
+
+      </div>
+
+      <!-- ปุ่มเริ่ม -->
+      <div class="px-6 pb-10 mt-2">
+        <button id="startBtn" onclick="startGame()" disabled class="w-full bg-gray-700 text-gray-400 font-black py-4 rounded-2xl shadow-lg transition-all text-xl tracking-wide disabled:opacity-50">
+          กรุณาเลือกเกม
+        </button>
+      </div>
+    </div>
+
+    <!-- 🏆 Game Over UI -->
+    <div id="gameOverUI" class="hidden absolute inset-0 z-40 bg-black/90 backdrop-blur-md flex-col items-center justify-center p-6">
+      <h2 class="text-5xl font-black text-white mb-2">GAME OVER</h2>
+      <p id="gameOverMsg" class="text-gray-400 mb-6 font-medium">คุณทำคะแนนได้</p>
+      <div class="bg-gray-800/50 w-full rounded-2xl p-6 mb-8 border border-gray-700 text-center">
+        <p class="text-6xl font-black text-green-400" id="finalScore">0</p>
+      </div>
+      <button onclick="restartGame()" class="w-full bg-pink-500 text-white font-bold py-4 rounded-xl mb-3 shadow-[0_0_20px_rgba(236,72,153,0.4)] active:scale-95 text-lg">
+        เล่นอีกครั้ง 🔄
+      </button>
+      <button onclick="backToMenu()" class="w-full bg-gray-700 text-white font-bold py-4 rounded-xl active:scale-95 text-lg">
+        กลับหน้าเมนู
+      </button>
+    </div>
+
+    <!-- สถานะโหลด AI -->
+    <div id="loadingUI" class="hidden absolute inset-0 z-50 bg-black flex flex-col items-center justify-center">
+      <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-pink-500 mb-4"></div>
+      <p class="text-white font-bold tracking-widest animate-pulse">กำลังเปิดกล้องและโหลด AI...</p>
+    </div>
+
+  </div>
+
+  <!-- ⚙️ JavaScript Core -->
+  <script>
+    // --- ตั้งค่าระบบและตัวแปรหลัก ---
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let isAILoaded = false;
+    let camera, faceMesh;
+    let playerFace = null;
+    let latestFrame = null;
+
+    // --- State ของเกม ---
+    let game = {
+      id: '',       // 'sushi', 'dodge', 'smile'
+      isRunning: false,
+      score: 0,
+      lives: 3,
+      items: [],
+      frameCount: 0
+    };
+
+    // -----------------------------------------
+    // 1. ระบบจัดการ UI (Menu & Navigation)
+    // -----------------------------------------
+    function selectGame(id, btnElement) {
+      game.id = id;
+      const startBtn = document.getElementById('startBtn');
+      startBtn.disabled = false;
+      startBtn.innerText = "ลุยเลย! (START)";
+      startBtn.className = "w-full bg-gradient-to-r from-pink-500 to-purple-600 text-white font-black py-4 rounded-2xl shadow-[0_0_25px_rgba(236,72,153,0.5)] active:scale-95 transition-all text-xl";
+    }
+
+    async function startGame() {
+      document.getElementById('menuPanel').classList.add('translate-y-full', 'opacity-0');
+      document.getElementById('gameUI').classList.remove('hidden');
+      
+      resetGameStats();
+
+      // โหลด AI ครั้งแรกครั้งเดียว
+      if (!isAILoaded) {
+        document.getElementById('loadingUI').classList.remove('hidden');
+        document.getElementById('loadingUI').classList.add('flex');
+        await initAI();
+      } else {
+        game.isRunning = true;
+      }
+    }
+
+    function backToMenu() {
+      game.isRunning = false;
+      document.getElementById('gameOverUI').classList.add('hidden');
+      document.getElementById('gameOverUI').classList.remove('flex');
+      document.getElementById('gameUI').classList.add('hidden');
+      
+      // เอาเมนูกลับมา
+      document.getElementById('menuPanel').classList.remove('translate-y-full', 'opacity-0');
+      ctx.clearRect(0, 0, canvas.width, canvas.height); // ล้างจอ
+    }
+
+    function restartGame() {
+      document.getElementById('gameOverUI').classList.add('hidden');
+      document.getElementById('gameOverUI').classList.remove('flex');
+      resetGameStats();
+      game.isRunning = true;
+    }
+
+    function resetGameStats() {
+      game.score = 0;
+      game.lives = 3;
+      game.items = [];
+      game.frameCount = 0;
+      updateUI();
+    }
+
+    function updateUI() {
+      document.getElementById('scoreText').innerText = game.score;
+      let hearts = "";
+      for(let i=0; i<game.lives; i++) hearts += "❤️";
+      for(let i=game.lives; i<3; i++) hearts += "🖤";
+      document.getElementById('livesText').innerText = hearts;
+      
+      if (game.lives <= 0) {
+        game.isRunning = false;
+        document.getElementById('finalScore').innerText = game.score;
+        
+        let msg = "";
+        if(game.id === 'sushi') msg = "คุณกินซูชิไปได้";
+        if(game.id === 'dodge') msg = "คุณหลบงานได้คะแนน";
+        if(game.id === 'smile') msg = "คุณรับทรัพย์ไปได้";
+        document.getElementById('gameOverMsg').innerText = msg;
+
+        document.getElementById('gameOverUI').classList.remove('hidden');
+        document.getElementById('gameOverUI').classList.add('flex');
+      }
+    }
+
+    // -----------------------------------------
+    // 2. ระบบ Game Logic สไลต์ 3-in-1
+    // -----------------------------------------
+    function processGameLogic() {
+      if (!game.isRunning) return;
+      game.frameCount++;
+
+      const cw = canvas.width;
+      const ch = canvas.height;
+
+      // 2.1 สุ่มปล่อยไอเทมตามเกมที่เลือก
+      if (game.id === 'sushi' && Math.random() < 0.02) {
+        game.items.push({ x: Math.random()*(cw-80)+40, y: -50, speed: 4 + Math.random()*3, emoji: '🍣' });
+      } 
+      else if (game.id === 'dodge' && Math.random() < 0.05) {
+        // หลบงาน ของตกเร็วและเยอะกว่า
+        const emojis = ['📁', '📧', '📉'];
+        game.items.push({ x: Math.random()*(cw-80)+40, y: -50, speed: 6 + Math.random()*5, emoji: emojis[Math.floor(Math.random()*3)] });
+      }
+      else if (game.id === 'smile' && game.frameCount % 60 === 0) {
+        // ยิ้มรับทรัพย์ มาเป็นระลอก (1 วิ 1 อัน)
+        game.items.push({ x: Math.random()*(cw-80)+40, y: -50, speed: 5, emoji: '💰' });
+      }
+
+      // ดึงพิกัดใบหน้า (ถ้าจับหน้าได้)
+      let noseX = 0, noseY = 0, mouthX = 0, mouthY = 0;
+      let isMouthOpen = false, isSmiling = false;
+
+      if (playerFace) {
+        // หมายเหตุ: ต้องกลับแกน X (1 - x) เพราะภาพวิดีโอถูก Flip เป็นกระจก
+        noseX = (1 - playerFace[1].x) * cw;
+        noseY = playerFace[1].y * ch;
+        
+        mouthX = (1 - playerFace[13].x) * cw;
+        mouthY = playerFace[13].y * ch;
+
+        // คำนวณการอ้าปาก (ระยะห่างริมฝีปากบน-ล่าง)
+        const mouthDist = playerFace[14].y - playerFace[13].y;
+        isMouthOpen = mouthDist > 0.04;
+
+        // คำนวณรอยยิ้ม (ระยะห่างมุมปากซ้าย-ขวา เทียบกับความกว้างหน้า)
+        const faceWidth = Math.abs(playerFace[234].x - playerFace[454].x);
+        const smileDist = Math.abs(playerFace[291].x - playerFace[61].x);
+        isSmiling = (smileDist / faceWidth) > 0.45; // ถ้ามุมปากกว้างกว่า 45% ของหน้า = ยิ้ม
+      }
+
+      // 2.2 อัปเดตตำแหน่งไอเทมและเช็กการชน (Collision)
+      for (let i = game.items.length - 1; i >= 0; i--) {
+        let item = game.items[i];
+        item.y += item.speed;
+
+        // --- กติกา: อ้าปากกินซูชิ ---
+        if (game.id === 'sushi' && playerFace) {
+          let dist = Math.hypot(mouthX - item.x, mouthY - item.y);
+          if (dist < 45 && isMouthOpen) {
+            game.score += 10; updateUI(); game.items.splice(i, 1); continue;
+          }
+          if (item.y > ch) {
+            game.lives--; updateUI(); game.items.splice(i, 1); continue;
+          }
+        }
+
+        // --- กติกา: เอียงหัวหลบงาน ---
+        if (game.id === 'dodge' && playerFace) {
+          let dist = Math.hypot(noseX - item.x, noseY - item.y);
+          if (dist < 45) { // ชนจมูก = โดนดาเมจ
+            game.lives--; updateUI(); game.items.splice(i, 1); continue;
+          }
+          if (item.y > ch) { // หลบพ้นได้คะแนน
+            game.score += 10; updateUI(); game.items.splice(i, 1); continue;
+          }
+        }
+
+        // --- กติกา: ยิ้มรับทรัพย์ ---
+        if (game.id === 'smile' && playerFace) {
+          let dist = Math.hypot(noseX - item.x, noseY - item.y);
+          if (dist < 50) {
+            if (isSmiling) { // ชนแล้วยิ้ม = ได้เงิน
+              game.score += 20; updateUI(); game.items.splice(i, 1); continue;
+            } else { // ชนแต่หน้าบึ้ง = โดนหักเลือด
+              game.lives--; updateUI(); game.items.splice(i, 1); continue;
+            }
+          }
+          if (item.y > ch) { // ปล่อยตกจอไม่เป็นไร
+            game.items.splice(i, 1); continue;
+          }
+        }
+      }
+    }
+
+    // -----------------------------------------
+    // 3. ระบบ Render กราฟิก (วาดลงจอ)
+    // -----------------------------------------
+    function drawGame() {
+      // 3.1 วาดพื้นหลังกล้อง (Flip กระจก)
+      if (latestFrame) {
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(latestFrame, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      }
+
+      if (!game.isRunning) return;
+
+      // 3.2 วาด Guide บนหน้าผู้เล่น
+      if (playerFace) {
+        const cw = canvas.width, ch = canvas.height;
+        const noseX = (1 - playerFace[1].x) * cw, noseY = playerFace[1].y * ch;
+        const mouthX = (1 - playerFace[13].x) * cw, mouthY = playerFace[13].y * ch;
+        
+        ctx.lineWidth = 4;
+
+        if (game.id === 'sushi') {
+          // เป้าเล็งที่ปาก
+          const isMouthOpen = (playerFace[14].y - playerFace[13].y) > 0.04;
+          ctx.beginPath();
+          ctx.arc(mouthX, mouthY + 10, 25, 0, 2 * Math.PI);
+          ctx.strokeStyle = isMouthOpen ? '#4ade80' : '#ef4444'; // เขียวพร้อมกิน / แดงปิดปาก
+          ctx.stroke();
+        } 
+        else if (game.id === 'dodge') {
+          // บาเรียป้องกันจมูก
+          ctx.beginPath();
+          ctx.arc(noseX, noseY, 30, 0, 2 * Math.PI);
+          ctx.strokeStyle = '#3b82f6'; // สีฟ้า
+          ctx.stroke();
+        }
+        else if (game.id === 'smile') {
+          // ขีดเส้นเช็กรอยยิ้ม
+          const faceWidth = Math.abs(playerFace[234].x - playerFace[454].x);
+          const isSmiling = (Math.abs(playerFace[291].x - playerFace[61].x) / faceWidth) > 0.45;
+          ctx.beginPath();
+          ctx.arc(noseX, noseY, 35, 0, 2 * Math.PI);
+          ctx.strokeStyle = isSmiling ? '#fbbf24' : '#ef4444'; // เหลืองยิ้มรับทรัพย์ / แดงหักเลือด
+          ctx.stroke();
+        }
+      }
+
+      // 3.3 วาดไอเทมที่กำลังตก
+      ctx.font = "45px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      game.items.forEach(item => {
+        ctx.fillText(item.emoji, item.x, item.y);
+      });
+    }
+
+    // -----------------------------------------
+    // 4. Main Game Loop & AI Core
+    // -----------------------------------------
+    function gameLoop() {
+      // ล้างจอ
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      processGameLogic();
+      drawGame();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    async function initAI() {
+      // โหลด FaceMesh
+      faceMesh = new FaceMesh({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+      }});
+
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      faceMesh.onResults((results) => {
+        latestFrame = results.image;
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+          playerFace = results.multiFaceLandmarks[0];
+          
+          // ซ่อนหน้า Loading เมื่อพร้อมเล่น
+          if (!isAILoaded) {
+            isAILoaded = true;
+            document.getElementById('loadingUI').classList.add('hidden');
+            document.getElementById('loadingUI').classList.remove('flex');
+            
+            // ตั้งค่าขนาด Canvas ให้ตรงกับกล้อง
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            game.isRunning = true;
+            requestAnimationFrame(gameLoop); // เริ่มลูปเกม
+          }
+        } else {
+          playerFace = null; // หน้าหลุดเฟรม
+        }
+      });
+
+      // เปิดกล้อง
+      camera = new Camera(video, {
+        onFrame: async () => {
+          await faceMesh.send({image: video});
+        },
+        width: 640,  // ใช้ความละเอียดกลางๆ ให้มือถือไม่ร้อน
+        height: 480
+      });
+
+      await camera.start();
+    }
+  </script>
+</body>
+</html>
